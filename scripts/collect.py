@@ -710,11 +710,35 @@ def serpapi_search(params: dict, key: str) -> dict:
     return r.json()
 
 
+def serpapi_resolve_location(location: str, key: str) -> str:
+    """Map a human-readable location ("Wollongong, NSW, Australia") to SerpApi's canonical name
+    ("Wollongong,New South Wales,Australia"). The locations endpoint is free and does not count as a search."""
+    if not location:
+        return location
+    try:
+        q = location.split(",")[0].strip()
+        r = get("https://serpapi.com/locations.json", params={"q": q, "limit": 10}, timeout=30)
+        cands = r.json() if r.status_code == 200 else []
+    except Exception:  # noqa: BLE001
+        return location
+    if not cands:
+        return location
+    tail = [t.strip().lower() for t in location.split(",")[1:]]
+    # Prefer canonical names that also contain the other parts the user gave (state / country).
+    for c in cands:
+        canon = (c.get("canonical_name") or "")
+        low = canon.lower()
+        if canon and all(t in low for t in tail if t and t not in ("nsw", "vic", "qld", "wa", "sa", "tas", "act", "nt")):
+            return canon
+    return cands[0].get("canonical_name") or location
+
+
 def serp_rankings(domain: str, keywords: list[str], key: str | None, cfg: dict, location: str) -> dict:
     if not key:
         return {"available": False, "reason": "no SERPAPI_API_KEY"}
     if not keywords:
         return {"available": False, "reason": "no keywords supplied"}
+    location = serpapi_resolve_location(location, key)
     rows, errors = [], []
     depth = int(cfg.get("serp_pages", 2))  # Google returns 10 results per call; each page costs one SerpApi search
     for kw in keywords:
