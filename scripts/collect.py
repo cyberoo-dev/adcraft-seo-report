@@ -223,14 +223,31 @@ def favicon_check(url: str, soup: BeautifulSoup) -> dict:
 
 def dns_checks(domain: str) -> dict:
     out = {"dmarc": None, "spf": None, "ns": [], "a": []}
+    import shutil
+    import socket
 
     def dig(qtype: str, name: str) -> list[str]:
         try:
-            r = subprocess.run(["dig", "+short", qtype, name], capture_output=True, text=True, timeout=15)
-            return [x.strip().strip('"').replace('" "', "") for x in r.stdout.splitlines() if x.strip()]
+            if shutil.which("dig"):
+                r = subprocess.run(["dig", "+short", qtype, name], capture_output=True, text=True, timeout=15)
+                return [x.strip().strip('"').replace('" "', "") for x in r.stdout.splitlines() if x.strip()]
+            if shutil.which("nslookup"):  # Windows fallback
+                r = subprocess.run(["nslookup", f"-type={qtype}", name], capture_output=True, text=True, timeout=15)
+                vals = []
+                for line in r.stdout.splitlines():
+                    s = line.strip()
+                    if qtype == "TXT" and '"' in s:
+                        vals.append(s.split('"', 1)[1].rsplit('"', 1)[0].replace('" "', ""))
+                    elif qtype == "NS" and "nameserver =" in s:
+                        vals.append(s.split("=", 1)[1].strip())
+                    elif qtype == "A" and s.startswith("Address") and "#" not in s and name not in s:
+                        vals.append(s.split(":", 1)[1].strip())
+                return vals
+            if qtype == "A":
+                return [socket.gethostbyname(name)]
         except Exception as e:  # noqa: BLE001
-            out.setdefault("errors", []).append(f"dig {qtype} {name}: {e}")
-            return []
+            out.setdefault("errors", []).append(f"dns {qtype} {name}: {e}")
+        return []
 
     for t in dig("TXT", f"_dmarc.{domain}"):
         if t.lower().startswith("v=dmarc1"):

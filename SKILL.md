@@ -12,7 +12,10 @@ using the deterministic scripts in this skill plus your own judgement for the co
 prompt visibility and the action plan. The claude-seo plugin supplies the Python runtime and Common Crawl
 data; never modify that plugin.
 
-All scripts run through `~/.claude/skills/seo-report/run.sh <script> ...` (never a bare python).
+All scripts run through the launcher (never a bare python):
+- macOS / Linux: `~/.claude/skills/seo-report/run.sh <script> ...`
+- Windows: `%USERPROFILE%\.claude\skills\seo-report\run.cmd <script> ...` (PowerShell: `& "$env:USERPROFILE\.claude\skills\seo-report\run.ps1" <script> ...`)
+Every command below is written with `run.sh`; substitute `run.cmd` on Windows. Open PDFs with `open` on macOS and `start` on Windows.
 Keys live in `~/.config/adcraft-seo/keys.env`. Agency details and defaults are in `config.json`.
 Output goes to `~/adcraft-seo-reports/<domain>/<YYYY-MM-DD>/`.
 
@@ -140,6 +143,8 @@ paste the report contents.
   quietly once a day, so both Macs stay current. After editing the skill here, commit and push:
   `git -C ~/.claude/skills/seo-report add -A && git -C ~/.claude/skills/seo-report commit -m "..." && git -C ~/.claude/skills/seo-report push`.
 - New Mac: `curl -fsSL https://raw.githubusercontent.com/cyberoo-dev/adcraft-seo-report/main/install.sh | bash`
-  (needs GitHub access to the private repo, e.g. `gh auth login` first), then copy `~/.config/adcraft-seo/keys.env` across.
+- New Windows PC: `powershell -ExecutionPolicy Bypass -c "iwr -useb https://raw.githubusercontent.com/cyberoo-dev/adcraft-seo-report/main/install.ps1 | iex"`
+  Both need read access to the repo; no sign-in is needed if the repo is public. Keys are never in the repo: put them in
+  `~/.config/adcraft-seo/keys.env` on each machine that should run external metrics.
 - Local SEO and GBP reports need the Google Business Profile's website field to match the audited domain; otherwise
   the listing is reported as unverified and the GBP audit says so.
