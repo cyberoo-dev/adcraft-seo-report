@@ -625,7 +625,10 @@ def ahrefs_dr(domain: str, key: str | None) -> dict:
         if r.status_code != 200:
             return {"available": False, "reason": f"HTTP {r.status_code}: {r.text[:120]}"}
         d = r.json()
-        return {"available": True, "domain_rating": d.get("domain_rating"), "attribution": "Domain Rating by Ahrefs"}
+        dr = d.get("domain_rating")
+        if isinstance(dr, dict):
+            dr = dr.get("domain_rating")
+        return {"available": True, "domain_rating": dr, "attribution": "Domain Rating by Ahrefs"}
     except Exception as e:  # noqa: BLE001
         return {"available": False, "reason": str(e)}
 
@@ -713,15 +716,27 @@ def serp_rankings(domain: str, keywords: list[str], key: str | None, cfg: dict, 
     if not keywords:
         return {"available": False, "reason": "no keywords supplied"}
     rows, errors = [], []
+    depth = int(cfg.get("serp_pages", 2))  # Google returns 10 results per call; each page costs one SerpApi search
     for kw in keywords:
-        try:
-            d = serpapi_search({"engine": "google", "q": kw, "google_domain": cfg.get("google_domain", "google.com.au"),
-                                "gl": cfg.get("gl", "au"), "hl": cfg.get("hl", "en"), "location": location, "num": 100}, key)
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"{kw}: {e}")
+        organic, d, pos = [], {}, None
+        for page in range(depth):
+            try:
+                dd = serpapi_search({"engine": "google", "q": kw, "google_domain": cfg.get("google_domain", "google.com.au"),
+                                     "gl": cfg.get("gl", "au"), "hl": cfg.get("hl", "en"), "location": location, "start": page * 10}, key)
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{kw} p{page + 1}: {e}")
+                break
+            if page == 0:
+                d = dd
+            batch = dd.get("organic_results", []) or []
+            for i, r in enumerate(batch):
+                r["position"] = page * 10 + i + 1
+            organic += batch
+            pos = next((r.get("position") for r in organic if domain in (r.get("link") or "").lower()), None)
+            if pos is not None or not batch:
+                break
+        if not d:
             continue
-        organic = d.get("organic_results", []) or []
-        pos = next((r.get("position") for r in organic if domain in (r.get("link") or "").lower()), None)
         top = [{"position": r.get("position"), "title": (r.get("title") or "")[:80], "link": r.get("link")} for r in organic[:5]]
         aio = d.get("ai_overview") or {}
         aio_present = bool(aio)
@@ -731,11 +746,11 @@ def serp_rankings(domain: str, keywords: list[str], key: str | None, cfg: dict, 
         local = d.get("local_results", {})
         places = local.get("places", []) if isinstance(local, dict) else (local or [])
         local_pos = next((i + 1 for i, p in enumerate(places) if domain in (p.get("website") or p.get("links", {}).get("website") or "").lower()), None)
-        rows.append({"keyword": kw, "position": pos, "top": top, "ai_overview": aio_present,
+        rows.append({"keyword": kw, "position": pos, "checked_to": len(organic), "top": top, "ai_overview": aio_present,
                      "ai_overview_cited": aio_cited, "ai_overview_refs": aio_refs[:10], "ai_overview_text": aio_text[:400],
                      "local_pack_position": local_pos, "local_pack_names": [p.get("title") for p in places[:3]],
                      "paa": [q.get("question") for q in (d.get("related_questions") or [])[:4]]})
-    return {"available": True, "rows": rows, "errors": errors, "location": location}
+    return {"available": True, "rows": rows, "errors": errors, "location": location, "depth": depth * 10}
 
 
 def serp_citations(domain: str, brand: str, key: str | None, cfg: dict) -> dict:
@@ -787,7 +802,7 @@ def serp_gbp_full(brand: str, location: str, domain: str, key: str | None, cfg: 
         out["details_error"] = str(e)[:160]
     if want_reviews and (base.get("data_id") or base.get("place_id")):
         try:
-            params = {"engine": "google_maps_reviews", "hl": cfg.get("hl", "en"), "sort_by": "newestFirst", "num": 20}
+            params = {"engine": "google_maps_reviews", "hl": cfg.get("hl", "en"), "sort_by": "newestFirst"}
             if base.get("data_id"):
                 params["data_id"] = base["data_id"]
             else:
@@ -888,8 +903,15 @@ def gemini_prompts(prompts: list[str], brand: str, domain: str, key: str | None)
         body = {"contents": [{"parts": [{"text": p + "\n\nAnswer with a numbered list of specific businesses (name and website if known), best first. Then one sentence on why."}]}],
                 "tools": [{"google_search": {}}]}
         try:
-            r = SESSION.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}",
-                             json=body, timeout=120)
+            r = None
+            for attempt in range(4):
+                r = SESSION.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}",
+                                 json=body, timeout=120)
+                if r.status_code in (429, 503) and attempt < 3:
+                    time.sleep(20 * (attempt + 1))
+                    continue
+                break
+            time.sleep(4)
             if r.status_code != 200:
                 errors.append(f"{p[:40]}: HTTP {r.status_code} {r.text[:120]}")
                 continue
@@ -975,6 +997,7 @@ def main() -> int:
     ap.add_argument("--skip-psi", action="store_true")
     ap.add_argument("--skip-browser", action="store_true")
     ap.add_argument("--external-only", action="store_true", help="Reuse an existing data.json and only (re)run external metrics")
+    ap.add_argument("--local-keyword", default="", help="Primary local keyword for the GBP keyword checks, e.g. 'marketing agency'")
     ap.add_argument("--local", action="store_true", help="Also fetch full Google Business Profile details, newest reviews and Yelp listing (3 extra SerpApi searches)")
     args = ap.parse_args()
 
@@ -1002,6 +1025,7 @@ def main() -> int:
         data["external"] = run_external(url, domain, brand, keywords, prompts, keys, defaults, location, args)
         data["keywords_requested"] = keywords
         data["prompts_requested"] = prompts
+        data["local_keyword"] = args.local_keyword
         write_json(out_dir / "data.json", data)
         log(f"done -> {out_dir / 'data.json'}")
         return 0
@@ -1072,6 +1096,7 @@ def main() -> int:
     data["external"] = {} if args.skip_external else run_external(url, domain, brand, keywords, prompts, keys, defaults, location, args)
     data["keywords_requested"] = keywords
     data["prompts_requested"] = prompts
+    data["local_keyword"] = args.local_keyword
 
     write_json(out_dir / "data.json", data)
     (out_dir / "raw.html").write_text(html)

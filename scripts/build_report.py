@@ -41,10 +41,10 @@ def verdict(score: float, noun: str) -> tuple[str, str]:
 
 class Check:
     def __init__(self, cid, title, status, summary, what="", how="", details=None, priority=LOW, weight=1,
-                 rec_title=None, kind="row", extra=None):
+                 rec_title=None, kind="row", extra=None, hide=False):
         self.d = {"id": cid, "title": title, "status": status, "summary": summary, "what": what, "how": how,
                   "details": details or [], "priority": priority, "weight": weight if status != INFO else 0,
-                  "rec_title": rec_title, "kind": kind, "extra": extra or {}}
+                  "rec_title": rec_title, "kind": kind, "extra": extra or {}, "hide": hide}
 
 
 # --------------------------------------------------------------------------- explanation copy
@@ -326,7 +326,7 @@ def ai_assessed_checks(ai: dict | None) -> list[Check]:
     for key, title, k, ok, bad, rec, w in spec:
         a = (ai or {}).get(key)
         if not a:
-            out.append(Check(key, title, INFO, "Not assessed in this run.", WHAT[k], HOW[k]))
+            out.append(Check(key, title, INFO, "", hide=True))
             continue
         st = PASS if a.get("pass") else (WARN if a.get("partial") else FAIL)
         out.append(Check(key, title, st, ok if st == PASS else bad, WHAT[k], HOW[k], [a.get("evidence", "")] if a.get("evidence") else [], priority=MED, weight=w, rec_title=rec))
@@ -338,6 +338,8 @@ def links_checks(d: dict) -> list[Check]:
     c: list[Check] = []
     ah, opr, cc = ext.get("ahrefs", {}), ext.get("openpagerank", {}), ext.get("commoncrawl", {})
     dr = ah.get("domain_rating") if ah.get("available") else None
+    if isinstance(dr, dict):
+        dr = dr.get("domain_rating")
     row = (opr.get("rows") or [{}])[0] if opr.get("available") else {}
     opr_score = row.get("open_page_rank") or row.get("page_rank_decimal")
     ref = row.get("referring_domains")
@@ -357,7 +359,7 @@ def links_checks(d: dict) -> list[Check]:
     elif opr_score is not None:
         strength = float(opr_score) * 10
     if strength is None:
-        c.append(Check("backlinks", "Backlink Summary", INFO, "Backlink authority data was not available for this run.", WHAT["backlinks"], HOW["backlinks"], kind="metrics", extra={"metrics": metrics}))
+        c.append(Check("backlinks", "Backlink Summary", INFO, "", hide=True))
     elif strength >= 40:
         c.append(Check("backlinks", "Backlink Summary", PASS, "You have a strong level of backlink activity to this website.", WHAT["backlinks"], HOW["backlinks"], weight=4, kind="metrics", extra={"metrics": metrics}))
     elif strength >= 20:
@@ -391,14 +393,17 @@ def rankings_checks(d: dict) -> list[Check]:
     rk = ext.get("rankings", {})
     c: list[Check] = []
     if not rk.get("available"):
-        c.append(Check("rankings", "Top Organic Keyword Rankings", INFO, f"Live ranking data was not available ({rk.get('reason', 'no data')}).", WHAT["rankings"], HOW["rankings"]))
-        return c
+        return [Check("rankings", "Top Organic Keyword Rankings", INFO, "", hide=True)]
     rows = rk.get("rows", [])
-    buckets = {"Position 1": 0, "Position 2-3": 0, "Position 4-10": 0, "Position 11-20": 0, "Position 21-30": 0, "Position 31-100": 0, "Not in top 100": 0}
+    depth = rk.get("depth", 20)
+    buckets = {"Position 1": 0, "Position 2-3": 0, "Position 4-10": 0, "Position 11-20": 0}
+    if depth > 20:
+        buckets.update({"Position 21-30": 0, f"Position 31-{depth}": 0})
+    buckets["Not in top " + str(depth)] = 0
     for r in rows:
         pos = r.get("position")
         if pos is None:
-            buckets["Not in top 100"] += 1
+            buckets["Not in top " + str(rk.get("depth", 20))] += 1
         elif pos == 1:
             buckets["Position 1"] += 1
         elif pos <= 3:
@@ -407,10 +412,12 @@ def rankings_checks(d: dict) -> list[Check]:
             buckets["Position 4-10"] += 1
         elif pos <= 20:
             buckets["Position 11-20"] += 1
-        elif pos <= 30:
+        elif pos <= 30 and "Position 21-30" in buckets:
             buckets["Position 21-30"] += 1
+        elif f"Position 31-{depth}" in buckets:
+            buckets[f"Position 31-{depth}"] += 1
         else:
-            buckets["Position 31-100"] += 1
+            buckets["Not in top " + str(depth)] += 1
     page1 = buckets["Position 1"] + buckets["Position 2-3"] + buckets["Position 4-10"]
     c.append(Check("rankings", "Top Organic Keyword Rankings", PASS if page1 >= max(1, len(rows) // 3) else WARN,
                    f"Your site ranks on page one for {page1} of the {len(rows)} keywords checked in {rk.get('location')}.", WHAT["rankings"], HOW["rankings"],
@@ -454,7 +461,7 @@ def usability_checks(d: dict) -> list[Check]:
     elif psi.get("available"):
         c.append(Check("cwv", "Google's Core Web Vitals", INFO, "Google is indicating that they do not have 'sufficient real-world speed data for this page' in order to make a Core Web Vitals assessment. This can occur for smaller websites or those that are not crawlable by Google.", WHAT["cwv"], HOW["cwv"]))
     else:
-        c.append(Check("cwv", "Google's Core Web Vitals", INFO, f"Core Web Vitals data was not available ({psi.get('reason', 'PageSpeed API not configured')}).", WHAT["cwv"], HOW["cwv"]))
+        c.append(Check("cwv", "Google's Core Web Vitals", INFO, "", hide=True))
     vp = p["viewport"]
     c.append(Check("viewport", "Use of Mobile Viewports", PASS if vp and "width=device-width" in vp else FAIL,
                    "Your page specifies a Viewport matching the device's size, allowing it to render appropriately across devices." if vp and "width=device-width" in vp else "Your page does not specify a responsive Viewport.",
@@ -479,7 +486,7 @@ def performance_checks(d: dict) -> list[Check]:
         c.append(Check("speed", "Website Load Speed", st, "Your page loads in a reasonable amount of time." if st == PASS else "Your page takes a long time to load.", WHAT["speed"], HOW["speed"], priority=MED, weight=3, rec_title="Improve page load speed", kind="timing",
                        extra={"metrics": [{"label": "Server Response", "value": f"{srv:.3f}s"}, {"label": "All Page Content Loaded", "value": f"{dcl:.1f}s"}, {"label": "All Page Scripts Complete", "value": f"{load:.1f}s"}]}))
     else:
-        c.append(Check("speed", "Website Load Speed", INFO, "Load timing could not be measured in this run.", WHAT["speed"], HOW["speed"]))
+        c.append(Check("speed", "Website Load Speed", INFO, "", hide=True))
     tw = res.get("total_wire") or 0
     if tw:
         st = PASS if tw <= 5_000_000 else (WARN if tw <= 8_000_000 else FAIL)
@@ -573,7 +580,7 @@ def local_checks(d: dict) -> list[Check]:
     g = ext.get("gbp", {})
     if g.get("available") and g.get("found") and not g.get("unverified"):
         c.append(Check("gbp", "Google Business Profile Identified", PASS, "A Google Business Profile was identified that links to this website.", WHAT["gbp"], HOW["gbp"], [g.get("title")]))
-        nap = [("Address", g.get("address")), ("Phone", g.get("phone")), ("Site", g.get("website")), ("Category", g.get("type"))]
+        nap = [("Address", g.get("address")), ("Phone", g.get("phone")), ("Site", g.get("website")), ("Category", ", ".join(g["type"]) if isinstance(g.get("type"), list) else g.get("type"))]
         missing = [k for k, v in nap if not v]
         c.append(Check("gbp_complete", "Google Business Profile Completeness", PASS if not missing else WARN, "Important business details are present on the Google Business Profile." if not missing else f"Some business details are missing from the Google Business Profile ({', '.join(missing)}).", WHAT["gbp_complete"], HOW["gbp_complete"], [f"{k}: {v}" for k, v in nap if v], priority=MED, rec_title="Complete your Google Business Profile"))
         r, n = g.get("rating"), g.get("reviews")
@@ -585,7 +592,7 @@ def local_checks(d: dict) -> list[Check]:
     elif g.get("available"):
         c.append(Check("gbp", "Google Business Profile Identified", WARN, "No Google Business Profile could be identified for this business.", WHAT["gbp"], HOW["gbp"], priority=MED, rec_title="Create or claim a Google Business Profile"))
     else:
-        c.append(Check("gbp", "Google Business Profile Identified", INFO, "Google Business Profile lookup was not available in this run.", WHAT["gbp"], HOW["gbp"]))
+        c.append(Check("gbp", "Google Business Profile Identified", INFO, "", hide=True))
     return c
 
 
@@ -630,14 +637,14 @@ def citation_checks(d: dict) -> list[Check]:
         links = w.get("links_to_site") or []
         c.append(Check("wikipedia", "Wikipedia Citations", PASS if links else FAIL, "Wikipedia pages link to your website." if links else "We could not find any Wikipedia pages linking to your website.", WHAT["wikipedia"], HOW["wikipedia"], [l["title"] for l in links[:5]], priority=LOW, weight=1, rec_title="Earn Wikipedia Citations"))
     else:
-        c.append(Check("wikipedia", "Wikipedia Citations", INFO, "Wikipedia could not be checked in this run.", WHAT["wikipedia"], HOW["wikipedia"]))
+        c.append(Check("wikipedia", "Wikipedia Citations", INFO, "", hide=True))
     for key, title, what, how, rec in (("reddit", "Reddit Citations", WHAT["reddit"], HOW["reddit"], "Earn Reddit Citations"), ("youtube", "YouTube Citations", WHAT["youtube_cite"], HOW["youtube_cite"], "Earn YouTube Citations")):
         r = ci.get(key, {})
         if r.get("available"):
             n = r.get("count", 0)
             c.append(Check(key, title, PASS if n else FAIL, f"Your website is referenced from {title.split()[0]}." if n else f"We could not find any {title.split()[0]} pages referencing your website.", what, how, [f"{x['title']}\n{x['snippet']}" for x in r.get("results", [])[:3]], priority=LOW, weight=1, rec_title=rec))
         else:
-            c.append(Check(key, title, INFO, f"{title.split()[0]} could not be checked in this run ({r.get('reason', 'no SerpApi key')}).", what, how))
+            c.append(Check(key, title, INFO, "", hide=True))
     return c
 
 
@@ -652,8 +659,7 @@ def prompt_checks(d: dict, ai: dict | None) -> list[Check]:
             engines[name] = rows
     c: list[Check] = []
     if not engines:
-        c.append(Check("prompts", "Platform Snapshot", INFO, "Prompt visibility was not measured in this run (no Gemini key and no Claude prompt results).", WHAT["prompts"], HOW["prompts"]))
-        return c
+        return [Check("prompts", "Platform Snapshot", INFO, "", hide=True)]
     total = sum(len(r) for r in engines.values())
     mentioned = sum(1 for r in engines.values() for x in r if x.get("mentioned"))
     per = {e: sum(1 for x in r if x.get("mentioned")) for e, r in engines.items()}
@@ -700,6 +706,7 @@ def score_section(checks: list[Check]) -> float | None:
 
 
 def section(sid, title, noun, checks, scored=True, weight=1, intro=None, score_override=None):
+    checks = [c for c in checks if not c.d.get("hide")]
     sc = score_override if score_override is not None else (score_section(checks) if scored else None)
     v = verdict(sc, noun) if sc is not None else ("", "")
     return {"id": sid, "title": title, "score": sc, "weight": weight if scored else 0, "verdict": v[0], "verdict_short": v[1],
@@ -731,6 +738,38 @@ def build(run_dir: Path, rtype: str, action_plan: bool) -> dict:
                  "Fixing high-priority issues first will have the largest effect on how well the site is crawled, indexed and ranked.") if rtype == "crawl" else ("This report grades your website based on the strength of various SEO factors such as On-Page Optimisation, Off-Page Links, Usability, Performance and more. "
                  "The overall grade is on an A+ to F scale, with most major, industry-leading websites in the A range. Improving your grade will generally make your website perform better for users and rank better in search engines. "
                  "There are recommendations for improving your website at the top of the report. Feel free to reach out to us if you'd like help improving your website's SEO!")
+    elif rtype in ("local", "gbp"):
+        import local_checks as lc
+        g = d["external"].get("gbp", {})
+        addr = ((g.get("details") or {}).get("address") or g.get("address") or "")
+        who = d["brand"] + (f", {addr}" if addr else "")
+        if rtype == "local":
+            gbp_sec = lc.gbp_identified_checks(d)
+            rev = lc.google_reviews_checks(d)
+            sections = [
+                section("gbp", "Google Business Profile", "Google Business Profile", gbp_sec, weight=25, intro="Your Google Business Profile is the listing customers see in Maps and local search. It needs to be identified, complete and consistent with your website."),
+                section("reviews", "Google Reviews", "reviews", rev, weight=15, intro="Ratings and reviews drive both customer trust and local rankings."),
+                section("listings", "Other Listings", "Other Listings", lc.yelp_checks(d), weight=10, intro="Listings on other platforms act as citations that confirm your business details to search engines and AI assistants."),
+                section("onpage", "Website On-Page SEO Results", "On-Page SEO", onpage_checks(d, geo_variant=True) + [c for c in local_checks(d) if c.d["id"] == "local_schema"], weight=25, intro="On-Page SEO is important to ensure Search Engines can understand your content and connect it to your local business."),
+                section("rankings", "Website Rankings", "Rankings", rankings_checks(d), scored=False),
+                section("links", "Website Backlinks", "Links", links_checks(d), weight=25, intro="Backlinks from local and industry websites are a strong signal of authority for local rankings."),
+            ]
+            dial_ids = ["gbp", "reviews", "listings", "onpage", "links"]
+            title = f"Local SEO Audit for {who}"
+            intro = ("This report evaluates your business's local SEO presence by the strength of several important factors including the business's Google Business Profile, website on-page SEO, rankings, backlinks, "
+                     "listings on external platforms and reviews across platforms. The overall assessment is graded on a scale from A+ to F. Improving your Local SEO is key to better visibility in local searches and subsequently more leads for your business.")
+        else:
+            sections = [
+                section("complete", "Profile Completeness", "profile completeness", lc.gbp_completeness_checks(d), weight=35, intro="A complete profile gives Google every signal it needs to show your business, and gives customers every reason to choose it."),
+                section("keyword", "Keyword", "keyword usage", lc.gbp_keyword_checks(d), weight=15, intro="Relevance for your core keyword comes from the name, categories, description, reviews and posts."),
+                section("reviews", "Reviews", "review profile", lc.gbp_review_checks(d), weight=35, intro="Review score, volume, recency and owner responses are all local ranking and conversion factors."),
+                section("posts", "Posts", "posting activity", lc.gbp_post_checks(d), weight=15, intro="Regular posts keep the profile fresh and give customers reasons to act."),
+            ]
+            dial_ids = ["complete", "keyword", "reviews", "posts"]
+            title = f"Google Business Profile Audit for {who}"
+            intro = ("This report evaluates your Google Business Profile by the strength of several important factors including completed profile information, reviews volume, strength and responsiveness, keyword and post usage and more. "
+                     "The overall assessment is graded on a scale from A+ to F. Improving your Google Business Profile is key to better visibility in local searches and subsequently more leads for your business.")
+        label = "Local SEO" if rtype == "local" else "GBP"
     else:  # geo / aeo
         access = geo_core_checks(d)
         rb = d["robots"]
@@ -776,12 +815,15 @@ def build(run_dir: Path, rtype: str, action_plan: bool) -> dict:
                  "and how your brand appears when people ask AI assistants about your products or services. As AI-driven search grows rapidly as a source of traffic and referrals, strengthening your " + label +
                  " helps ensure your business is surfaced and cited by these tools. You'll find recommendations for improvement throughout the report. Feel free to reach out if you'd like help improving your website's visibility in AI search!")
 
+    sections = [s for s in sections if s["checks"]]
     scored = [s for s in sections if s["score"] is not None and s["weight"]]
     overall = round(sum(s["score"] * s["weight"] for s in scored) / sum(s["weight"] for s in scored)) if scored else 0
     dials = []
     for sid in dial_ids:
-        s = next(x for x in sections if x["id"] == sid)
-        dials.append({"id": sid, "label": {"onpage": "On-Page SEO", "geo": "GEO", "links": "Links", "usability": "Usability", "performance": "Performance", "access": "Accessibility", "content": "Content", "prompts": "Prompt Visibility", "citations": "Citations"}[sid], "score": s["score"]})
+        s = next((x for x in sections if x["id"] == sid), None)
+        if s is None or s["score"] is None:
+            continue
+        dials.append({"id": sid, "label": dial_label(sid, s["title"]), "score": s["score"]})
     recs = []
     for s in sections:
         for c in s["checks"]:
@@ -790,6 +832,8 @@ def build(run_dir: Path, rtype: str, action_plan: bool) -> dict:
     order = {HIGH: 0, MED: 1, LOW: 2}
     recs.sort(key=lambda r: order[r["priority"]])
     v = verdict(overall, "page" if rtype in ("seo", "crawl") else label)
+    if rtype in ("local", "gbp"):
+        v = verdict(overall, label)
     report = {
         "type": rtype, "title": title, "intro": intro, "domain": d["domain"], "url": d["url"], "brand": d["brand"],
         "generated": d["collected_at"], "agency": cfg.get("agency", {}), "overall": overall, "grade": grade(overall),
@@ -805,7 +849,8 @@ def build(run_dir: Path, rtype: str, action_plan: bool) -> dict:
 
 def dial_label(sid: str, title: str) -> str:
     return {"onpage": "On-Page SEO", "geo": "GEO", "links": "Links", "usability": "Usability", "performance": "Performance", "social": "Social", "local": "Local SEO", "technology": "Technology",
-            "access": "Accessibility", "content": "Content", "prompts": "Prompt Visibility", "citations": "Citations", "rankings": "Rankings", "airank": "AI Search"}.get(sid, title)
+            "access": "Accessibility", "content": "Content", "prompts": "Prompt Visibility", "citations": "Citations", "rankings": "Rankings", "airank": "AI Search",
+            "gbp": "GBP", "reviews": "Reviews", "listings": "Other Listings", "complete": "Completeness", "keyword": "Keyword", "posts": "Posts"}.get(sid, title)
 
 
 def crawl_issues(crawl: dict) -> dict:
@@ -858,7 +903,7 @@ def crawl_issues(crawl: dict) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir")
-    ap.add_argument("--type", default="seo", choices=["seo", "geo", "aeo", "crawl"])
+    ap.add_argument("--type", default="seo", choices=["seo", "geo", "aeo", "crawl", "local", "gbp"])
     ap.add_argument("--no-action-plan", action="store_true")
     a = ap.parse_args()
     run = Path(a.run_dir).expanduser()

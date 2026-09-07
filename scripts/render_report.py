@@ -194,6 +194,22 @@ def render_kind(c: dict) -> str:
     if k == "schema":
         rows = "".join(f'<tr><td class="mono" style="padding-left:{8 + 10*(len(r[0]) - len(r[0].lstrip()))}px">{e(r[0].strip())}</td><td class="wrap">{e(r[1])}</td></tr>' for r in x.get("rows", []))
         return f'<div class="dbox">{e(", ".join(x.get("types", [])))}</div><table class="mini"><tbody>{rows}</tbody></table>'
+    if k == "ratingdist":
+        r_, n, dist = x.get("rating"), x.get("count"), x.get("dist", {})
+        stars = "★" * int(round(r_ or 0)) + "☆" * (5 - int(round(r_ or 0)))
+        mx = max(list(dist.values()) + [1])
+        bars = "".join(f'<tr><td class="mono">{k2}</td><td><div class="bar" style="width:{int(140*v/mx)}px"></div></td><td class="c">{v}</td></tr>' for k2, v in sorted(dist.items(), key=lambda kv: -int(kv[0])))
+        return (f'<div class="metrics"><div class="metric"><div class="metric-big">{e(r_)} <span class="stars">{stars}</span></div><div class="metric-label">{e(n)} reviews</div></div>'
+                f'<div class="metric wide"><div class="metric-label">Rating distribution (last {x.get("sample", 0)} reviews)</div><table class="mini narrow"><tbody>{bars}</tbody></table></div></div>')
+    if k == "reviewcards":
+        cards = "".join(f'<div class="card"><div class="card-head"><span class="stars small">{e(rv["stars"])}</span> <span class="muted">{e(rv.get("date") or "")}</span></div><p>{e(rv["text"])}</p></div>' for rv in x.get("reviews", []))
+        return f'<div class="cards">{cards}</div>'
+    if k == "postcards":
+        cards = "".join(f'<div class="card"><div class="card-head"><span class="muted">{e(p.get("date") or "")}</span></div><p>{e(p.get("text") or "")}</p></div>' for p in x.get("posts", []))
+        return f'<div class="cards">{cards}</div>'
+    if k == "hours":
+        rows = "".join(f'<tr><td>{e(r_[0])}</td><td>{e(r_[1])}</td></tr>' for r_ in x.get("rows", []))
+        return f'<table class="mini narrow"><thead><tr><th>Day</th><th>Hours</th></tr></thead><tbody>{rows}</tbody></table>'
     if k == "reviews":
         r, n = x.get("rating"), x.get("count")
         stars = "★" * int(round(r or 0)) + "☆" * (5 - int(round(r or 0)))
@@ -225,6 +241,8 @@ def render_kind(c: dict) -> str:
 
 
 def render_check(c: dict) -> str:
+    if c.get("hide"):
+        return ""
     st = c["status"]
     body = render_kind(c)
     details = details_box(c.get("details", [])) if c.get("kind", "row") in ("row", "metrics", "history") or not body else ""
@@ -233,8 +251,9 @@ def render_check(c: dict) -> str:
     expl = ""
     if c.get("what") or c.get("how"):
         expl = '<div class="explain">' + (f"<p>{e(c['what'])}</p>" if c.get("what") else "") + (f"<p>{e(c['how'])}</p>" if c.get("how") else "") + "</div>"
+    icon = status_icon(st) if (st != "info" or c.get("summary")) else ""
     return (f'<div class="check check-{st}"><div class="check-head"><div class="check-text"><div class="check-title">{e(c["title"])}</div>'
-            f'<div class="check-summary">{e(c["summary"])}</div></div><div class="check-icon">{status_icon(st)}</div></div>'
+            f'<div class="check-summary">{e(c["summary"])}</div></div><div class="check-icon">{icon}</div></div>'
             f'{details}{body}{expl}</div>')
 
 
@@ -332,7 +351,8 @@ td.wrap { word-break: break-all; }
 .serp-fav { width: 22px; height: 22px; border-radius: 50%; float: left; margin-right: 10px; background: #f1f3f4; } .serp-brand { font-size: 11px; color: #202124; } .serp-url { font-size: 10px; color: #4d5156; }
 .serp-title { color: #1a0dab; font-size: 15px; margin: 6px 0 2px; clear: both; } .serp-desc { color: #4d5156; font-size: 11px; }
 ul.techlist { columns: 3; list-style: none; padding: 0; margin: 8px 0; font-size: 10.5px; } ul.techlist li { padding: 3px 0; border-bottom: 1px dashed #e6e9ef; break-inside: avoid; }
-.stars { color: #f2c12e; font-size: 16px; }
+.stars { color: #f2c12e; font-size: 16px; } .stars.small { font-size: 12px; }
+.cards { display: flex; gap: 12px; margin: 10px 0; } .card { flex: 1; border: 1px solid #e6e9ef; border-radius: 6px; padding: 8px 10px; font-size: 10px; color: #4b5563; } .card p { margin: 6px 0 0; } .card-head { display: flex; justify-content: space-between; align-items: center; }
 table.grid td.prompt { width: 34%; font-size: 10px; } .rankbadge { display: inline-block; background: #e3edfb; color: #2f80ed; border-radius: 3px; padding: 1px 6px; font-size: 9px; font-weight: 500; }
 .rankbadge.mentioned { background: #e3f8ec; color: #1e9e5a; } .rankbadge.none { background: #f3f4f6; color: #9aa3b2; }
 ol.plist { margin: 4px 0 0; padding-left: 14px; font-size: 9px; color: #6b7280; } ol.plist li { margin: 0; }

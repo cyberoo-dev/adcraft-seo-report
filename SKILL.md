@@ -2,7 +2,7 @@
 name: seo-report
 description: "Generate branded, SEOptimer-style SEO / GEO / AEO / site-crawl audit reports (HTML + PDF) for any website, on the Claude plan with free data sources. Use for: seo report, geo report, aeo report, audit report, client audit, seoptimer replacement, crawl report, backlink and ranking snapshot. Invoked as /seo-report <url>."
 user-invocable: true
-argument-hint: "<url> [seo|geo|aeo|crawl|all] [--plan] [--summary] [--white-label \"Client\"] [--crawl N] [--location \"City, State, Country\"]"
+argument-hint: "<url> [seo|geo|aeo|local|gbp|crawl|all] [--plan] [--summary] [--white-label \"Client\"] [--crawl N] [--location \"City, State, Country\"]"
 ---
 
 # Adcraft SEO Report
@@ -21,7 +21,7 @@ Output goes to `~/adcraft-seo-reports/<domain>/<YYYY-MM-DD>/`.
 Parse `$ARGUMENTS`. The first token is the URL (required; if missing, ask for it). Then use **one**
 AskUserQuestion round for anything not already given on the command line:
 
-1. **Report type** (multiSelect): SEO Audit (Recommended) / GEO Audit / AEO Audit / Site Crawl & Issues
+1. **Report type** (multiSelect): SEO Audit (Recommended) / GEO Audit / AEO Audit / Local SEO Audit / Google Business Profile Audit / Site Crawl & Issues
 2. **Scope**: Homepage only (Recommended) / Crawl up to 50 pages / Crawl up to 200 pages
 3. **Extras** (multiSelect): Action plan / Executive summary / White label (no Adcraft branding) / Deep analysis via claude-seo agents
 4. **Keywords & prompts**: Let Claude choose (Recommended) / I'll provide them
@@ -45,8 +45,10 @@ Takes 30 to 90 seconds. Then read `$RUN/data.json` (use `python3 -c` or `jq` to 
 From the page content decide:
 - **brand**: confirm or correct `data.brand`.
 - **location**: city/state/country the business serves (schema address, footer, copy). Default is in config.json.
-- **8 keywords**: realistic commercial queries a customer would type, mixing service + location
-  ("web design wollongong"), brand ("adcraft studio"), and 2 broader ones. Fewer for national brands is fine.
+- **6 keywords**: realistic commercial queries a customer would type, mixing service + location
+  ("web design wollongong"), the brand name ("adcraft studio"), and one broader term. Google returns 10 results
+  per SerpApi search and we check two pages, so each keyword costs up to 2 of the 250 free monthly searches.
+- **local keyword** (Local/GBP only): the single category phrase the business most wants to own, e.g. "marketing agency".
 - **10 discovery prompts**: natural questions someone would ask an AI assistant when looking for this kind of
   business in this area, e.g. "What are the best digital marketing agencies in Wollongong for a small business?".
   Vary intent: best/recommended, specific service, comparison, budget, "who should I hire for".
@@ -58,13 +60,16 @@ If the user chose to provide them, use theirs. Tell the user the lists in one sh
 ```
 ~/.claude/skills/seo-report/run.sh collect.py <url> --out $RUN --external-only \
   --brand "<brand>" --location "<location>" \
-  --keywords "kw1;kw2;..." --prompts "p1;p2;..."
+  --keywords "kw1;kw2;..." --prompts "p1;p2;..." \
+  [--local --local-keyword "marketing agency"]     # only for Local SEO / GBP reports (3 extra SerpApi searches)
 ```
 
 This calls Ahrefs DR, OpenPageRank, Common Crawl, PageSpeed (if key), SerpApi rankings + AI Overviews +
 local pack + Reddit/YouTube citations + Google Maps listing, Wikipedia, and Gemini grounded prompts.
-Missing keys degrade gracefully (those checks render as "not measured"). Budget: about 11 SerpApi searches per
-report (8 keywords + 3), out of 250 free per month. Skip `--prompts` for SEO-only reports to save Gemini quota.
+Anything without data is simply omitted from the report (no "not measured" rows, sections or dials). Budget:
+about 15 SerpApi searches for an SEO/GEO run (6 keywords x up to 2 pages + 3 citation/listing searches) and 18
+with `--local`, out of 250 free per month. Skip `--prompts` for SEO-only reports to save Gemini quota (free tier
+is rate limited; the collector retries 429s automatically).
 Add `--skip-cc` if Common Crawl is slow (first run downloads a large ranking file, later runs are cached).
 
 ## Step 4: Your assessments -> `$RUN/ai.json`
@@ -106,7 +111,7 @@ Write `$RUN/ai.json` with this shape (omit keys you did not do):
 For each selected type:
 
 ```
-~/.claude/skills/seo-report/run.sh build_report.py $RUN --type seo|geo|aeo|crawl [--no-action-plan]
+~/.claude/skills/seo-report/run.sh build_report.py $RUN --type seo|geo|aeo|local|gbp|crawl [--no-action-plan]
 ~/.claude/skills/seo-report/run.sh render_report.py $RUN --name <type>-report [--white-label "Client Name"]
 ```
 
@@ -131,6 +136,10 @@ paste the report contents.
 - Links score is only meaningful when Ahrefs or OpenPageRank keys are present.
 - To test all data sources at once: `run.sh check_keys.py <domain>`.
 - To change agency branding, edit `config.json` and `assets/adcraft-logo.svg`.
-- Syncing to another Mac: copy `~/.claude/skills/seo-report` and `~/.config/adcraft-seo`, install the claude-seo
-  plugin there, set `CLAUDE_SEO_PYTHON` in `~/.claude/settings.json` env if system Python is older than 3.10,
-  and run `/seo setup` once.
+- Source of truth is the private GitHub repo `cyberoo-dev/adcraft-seo-report`. `run.sh` fast-forward pulls it
+  quietly once a day, so both Macs stay current. After editing the skill here, commit and push:
+  `git -C ~/.claude/skills/seo-report add -A && git -C ~/.claude/skills/seo-report commit -m "..." && git -C ~/.claude/skills/seo-report push`.
+- New Mac: `curl -fsSL https://raw.githubusercontent.com/cyberoo-dev/adcraft-seo-report/main/install.sh | bash`
+  (needs GitHub access to the private repo, e.g. `gh auth login` first), then copy `~/.config/adcraft-seo/keys.env` across.
+- Local SEO and GBP reports need the Google Business Profile's website field to match the audited domain; otherwise
+  the listing is reported as unverified and the GBP audit says so.

@@ -12,7 +12,8 @@
     "google_domain": "google.com.au",
     "gl": "au",
     "hl": "en",
-    "max_keywords": 8,
+    "max_keywords": 6,
+    "serp_pages": 2,
     "max_prompts": 10,
     "crawl_pages": 50,
     "output_dir": "~/adcraft-seo-reports"

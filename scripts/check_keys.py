@@ -70,7 +70,7 @@ def main():
             {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json.dumps({"domains": [DOMAIN], "include_history": False}).encode(),
         )
-        first = (d.get("response") or d.get("data") or d.get("domains") or [d])[0]
+        first = (d.get("results") or d.get("response") or d.get("data") or [d])[0]
         return {kk: first.get(kk) for kk in ("domain", "open_page_rank", "rank", "referring_domains")}
 
     def serpapi():
@@ -85,7 +85,7 @@ def main():
                 "gl": "au",
                 "hl": "en",
                 "location": "Wollongong, New South Wales, Australia",
-                "num": 20,
+                "num": 10,
                 "api_key": key,
             }
         )
@@ -114,11 +114,12 @@ def main():
         return f"mentions_domain={DOMAIN in text or any(DOMAIN in (c or '') for c in cites)} cites={len(cites)} text={text[:120]!r}"
 
     def reddit():
-        d = call(
-            "https://www.reddit.com/search.json?" + urllib.parse.urlencode({"q": DOMAIN, "limit": 5}),
-            {"User-Agent": "adcraft-seo-report/0.1"},
-        )
-        return f"reddit_posts_mentioning={len(d.get('data', {}).get('children', []))}"
+        key = k.get("SERPAPI_API_KEY")
+        if not key:
+            return "skipped (no SerpApi key; Reddit is checked via SerpApi site: search)"
+        q = urllib.parse.urlencode({"engine": "google", "q": f'site:reddit.com "{DOMAIN}"', "gl": "au", "hl": "en", "api_key": key})
+        d = call("https://serpapi.com/search.json?" + q, timeout=60)
+        return f"reddit_results={len(d.get('organic_results', []))} (via SerpApi)"
 
     def wikipedia():
         brand = DOMAIN.split(".")[0]
