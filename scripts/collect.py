@@ -1060,6 +1060,9 @@ def main() -> int:
     ap.add_argument("--prompts", default="")
     ap.add_argument("--brand", default="")
     ap.add_argument("--location", default=None)
+    ap.add_argument("--google-domain", default="", help="Override google_domain from config.json, e.g. google.it")
+    ap.add_argument("--gl", default="", help="Override country code from config.json, e.g. it")
+    ap.add_argument("--hl", default="", help="Override language code from config.json, e.g. it")
     ap.add_argument("--crawl", type=int, default=0)
     ap.add_argument("--skip-external", action="store_true")
     ap.add_argument("--skip-cc", action="store_true")
@@ -1071,7 +1074,13 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = load_config()
-    defaults = cfg.get("defaults", {})
+    defaults = dict(cfg.get("defaults", {}))
+    if args.google_domain:
+        defaults["google_domain"] = args.google_domain
+    if args.gl:
+        defaults["gl"] = args.gl
+    if args.hl:
+        defaults["hl"] = args.hl
     keys = load_keys()
     if keys.get("RELAY_URL") and keys.get("RELAY_TOKEN"):
         RELAY.update({"url": keys["RELAY_URL"], "token": keys["RELAY_TOKEN"]})
