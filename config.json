@@ -1,0 +1,20 @@
+{
+  "agency": {
+    "name": "AdCraft Studio",
+    "address": "Level 1, 17 Flinders Street, Wollongong",
+    "email": "enquiries@adcraftstudio.com.au",
+    "website": "https://adcraftstudio.com.au/",
+    "logo": "assets/adcraft-logo.svg",
+    "accent": "#2f80ed"
+  },
+  "defaults": {
+    "location": "Wollongong, New South Wales, Australia",
+    "google_domain": "google.com.au",
+    "gl": "au",
+    "hl": "en",
+    "max_keywords": 8,
+    "max_prompts": 10,
+    "crawl_pages": 50,
+    "output_dir": "~/adcraft-seo-reports"
+  }
+}
