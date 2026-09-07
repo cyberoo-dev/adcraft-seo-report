@@ -144,7 +144,11 @@ paste the report contents.
   `git -C ~/.claude/skills/seo-report add -A && git -C ~/.claude/skills/seo-report commit -m "..." && git -C ~/.claude/skills/seo-report push`.
 - New Mac: `curl -fsSL https://raw.githubusercontent.com/cyberoo-dev/adcraft-seo-report/main/install.sh | bash`
 - New Windows PC: `powershell -ExecutionPolicy Bypass -c "iwr -useb https://raw.githubusercontent.com/cyberoo-dev/adcraft-seo-report/main/install.ps1 | iex"`
-  Both need read access to the repo; no sign-in is needed if the repo is public. Keys are never in the repo: put them in
-  `~/.config/adcraft-seo/keys.env` on each machine that should run external metrics.
+  The repo is public, so no sign-in is needed. Keys are never in the repo.
+- Shared / office computers must not hold vendor keys. They use the key relay instead: a Cloudflare Worker
+  (`relay/worker.js`) that holds the vendor keys as secrets. Their `keys.env` contains only `RELAY_URL` and
+  `RELAY_TOKEN` (from `~/.config/adcraft-seo/relay.env` on the Mac that ran `relay/deploy.sh`). The collector
+  routes every external call through the relay automatically when vendor keys are blank. Revoke access at any
+  time with `relay/deploy.sh --rotate` on the Mac.
 - Local SEO and GBP reports need the Google Business Profile's website field to match the audited domain; otherwise
   the listing is reported as unverified and the GBP audit says so.

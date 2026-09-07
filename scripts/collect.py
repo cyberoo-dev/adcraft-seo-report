@@ -30,6 +30,14 @@ from common import (  # noqa: E402
     STOPWORDS, UA, domain_of, load_config, load_keys, normalize_url, same_site, write_json,
 )
 
+RELAY: dict = {}  # filled from keys.env: RELAY_URL + RELAY_TOKEN (used when vendor keys are absent)
+
+
+def relay_post(path: str, payload: dict, timeout: int = 90):
+    r = SESSION.post(RELAY["url"].rstrip("/") + path, json=payload, headers={"Authorization": f"Bearer {RELAY['token']}"}, timeout=timeout)
+    return r
+
+
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": UA, "Accept-Language": "en-AU,en;q=0.9"})
 # macOS: consulting the system proxy config (SystemConfiguration) makes every later fork()+exec
@@ -634,11 +642,14 @@ def detect_tech(html: str, scripts: list[str]) -> list[str]:
 
 
 def ahrefs_dr(domain: str, key: str | None) -> dict:
-    if not key:
+    if not key and not RELAY:
         return {"available": False, "reason": "no AHREFS_API_KEY"}
     try:
-        r = get(f"https://api.ahrefs.com/v3/public/domain-rating-free?target={quote(domain)}",
-                headers={"Authorization": f"Bearer {key}", "Accept": "application/json"})
+        if key:
+            r = get(f"https://api.ahrefs.com/v3/public/domain-rating-free?target={quote(domain)}",
+                    headers={"Authorization": f"Bearer {key}", "Accept": "application/json"})
+        else:
+            r = relay_post("/ahrefs", {"target": domain})
         if r.status_code != 200:
             return {"available": False, "reason": f"HTTP {r.status_code}: {r.text[:120]}"}
         d = r.json()
@@ -651,12 +662,15 @@ def ahrefs_dr(domain: str, key: str | None) -> dict:
 
 
 def openpagerank(domains: list[str], key: str | None) -> dict:
-    if not key:
+    if not key and not RELAY:
         return {"available": False, "reason": "no OPENPAGERANK_API_KEY"}
     try:
-        r = SESSION.post("https://openpagerank.keywordseverywhere.com/v1/domains/bulk",
-                         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                         json={"domains": domains[:100], "include_history": True}, timeout=TIMEOUT)
+        if key:
+            r = SESSION.post("https://openpagerank.keywordseverywhere.com/v1/domains/bulk",
+                             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                             json={"domains": domains[:100], "include_history": True}, timeout=TIMEOUT)
+        else:
+            r = relay_post("/opr", {"domains": domains[:100], "include_history": True})
         if r.status_code != 200:
             return {"available": False, "reason": f"HTTP {r.status_code}: {r.text[:160]}"}
         d = r.json()
@@ -692,10 +706,13 @@ def commoncrawl(domain: str) -> dict:
 
 def pagespeed(url: str, key: str | None, strategy: str) -> dict:
     params = {"url": url, "strategy": strategy, "category": ["performance", "seo", "accessibility", "best-practices"]}
-    if key:
-        params["key"] = key
     try:
-        r = get("https://www.googleapis.com/pagespeedonline/v5/runPagespeed", params=params, timeout=120)
+        if not key and RELAY:
+            r = relay_post("/psi", {"params": params}, timeout=150)
+        else:
+            if key:
+                params["key"] = key
+            r = get("https://www.googleapis.com/pagespeedonline/v5/runPagespeed", params=params, timeout=120)
         if r.status_code != 200:
             return {"available": False, "reason": f"HTTP {r.status_code}: {r.text[:160]}"}
         d = r.json()
@@ -719,12 +736,20 @@ def pagespeed(url: str, key: str | None, strategy: str) -> dict:
         return {"available": False, "reason": str(e)[:200]}
 
 
-def serpapi_search(params: dict, key: str) -> dict:
-    params = {**params, "api_key": key}
-    r = get("https://serpapi.com/search.json", params=params, timeout=90)
+def serpapi_search(params: dict, key: str | None) -> dict:
+    if key:
+        r = get("https://serpapi.com/search.json", params={**params, "api_key": key}, timeout=90)
+    elif RELAY:
+        r = relay_post("/serpapi", {"params": params}, timeout=120)
+    else:
+        raise RuntimeError("no SERPAPI_API_KEY and no relay")
     if r.status_code != 200:
         raise RuntimeError(f"SerpApi HTTP {r.status_code}: {r.text[:160]}")
     return r.json()
+
+
+def serp_ok(key: str | None) -> bool:
+    return bool(key or RELAY)
 
 
 def serpapi_resolve_location(location: str, key: str) -> str:
@@ -751,7 +776,7 @@ def serpapi_resolve_location(location: str, key: str) -> str:
 
 
 def serp_rankings(domain: str, keywords: list[str], key: str | None, cfg: dict, location: str) -> dict:
-    if not key:
+    if not serp_ok(key):
         return {"available": False, "reason": "no SERPAPI_API_KEY"}
     if not keywords:
         return {"available": False, "reason": "no keywords supplied"}
@@ -796,7 +821,7 @@ def serp_rankings(domain: str, keywords: list[str], key: str | None, cfg: dict, 
 
 def serp_citations(domain: str, brand: str, key: str | None, cfg: dict) -> dict:
     out = {"reddit": {"available": False}, "youtube": {"available": False}}
-    if not key:
+    if not serp_ok(key):
         return out
     for name, q in (("reddit", f'site:reddit.com "{brand}" OR "{domain}"'), ("youtube", f'site:youtube.com "{brand}" OR "{domain}"')):
         try:
@@ -867,7 +892,7 @@ def serp_gbp_full(brand: str, location: str, domain: str, key: str | None, cfg: 
 
 
 def serp_yelp(brand: str, location: str, key: str | None, cfg: dict) -> dict:
-    if not key:
+    if not serp_ok(key):
         return {"available": False, "reason": "no SERPAPI_API_KEY"}
     try:
         d = serpapi_search({"engine": "yelp", "find_desc": brand, "find_loc": location}, key)
@@ -883,7 +908,7 @@ def serp_yelp(brand: str, location: str, key: str | None, cfg: dict) -> dict:
 
 
 def serp_gbp(brand: str, location: str, domain: str, key: str | None, cfg: dict) -> dict:
-    if not key:
+    if not serp_ok(key):
         return {"available": False, "reason": "no SERPAPI_API_KEY"}
     try:
         d = serpapi_search({"engine": "google_maps", "q": f"{brand} {location.split(',')[0]}", "type": "search",
@@ -935,7 +960,7 @@ def youtube_channel(url: str | None) -> dict:
 
 
 def gemini_prompts(prompts: list[str], brand: str, domain: str, key: str | None) -> dict:
-    if not key:
+    if not key and not RELAY:
         return {"available": False, "reason": "no GEMINI_API_KEY"}
     if not prompts:
         return {"available": False, "reason": "no prompts supplied"}
@@ -946,8 +971,11 @@ def gemini_prompts(prompts: list[str], brand: str, domain: str, key: str | None)
         try:
             r = None
             for attempt in range(4):
-                r = SESSION.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}",
-                                 json=body, timeout=120)
+                if key:
+                    r = SESSION.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}",
+                                     json=body, timeout=120)
+                else:
+                    r = relay_post("/gemini", {"model": "gemini-2.5-flash", "body": body}, timeout=150)
                 if r.status_code in (429, 503) and attempt < 3:
                     time.sleep(20 * (attempt + 1))
                     continue
@@ -1045,6 +1073,9 @@ def main() -> int:
     cfg = load_config()
     defaults = cfg.get("defaults", {})
     keys = load_keys()
+    if keys.get("RELAY_URL") and keys.get("RELAY_TOKEN"):
+        RELAY.update({"url": keys["RELAY_URL"], "token": keys["RELAY_TOKEN"]})
+        log(f"using key relay at {keys['RELAY_URL']}")
     url = normalize_url(args.url)
     domain = domain_of(url)
     out_dir = Path(os.path.expanduser(args.out))

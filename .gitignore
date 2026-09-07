@@ -3,3 +3,7 @@ __pycache__/
 .DS_Store
 keys.env
 .last-pull
+relay/.dev.vars
+relay/node_modules/
+relay/.wrangler/
+relay/.devtoken

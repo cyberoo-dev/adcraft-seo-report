@@ -1,0 +1,10 @@
+name = "adcraft-seo-relay"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+[vars]
+DAILY_LIMIT = "400"
+
+# Secrets (set with `wrangler secret put NAME`, never in this file):
+#   RELAY_TOKEN, AHREFS_API_KEY, OPENPAGERANK_API_KEY, SERPAPI_API_KEY, GEMINI_API_KEY, GOOGLE_API_KEY
