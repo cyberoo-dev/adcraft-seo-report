@@ -98,4 +98,11 @@ else
   say "Keys file already present at $CONF_DIR/keys.env"
 fi
 
-say "Done. In Claude Code run:  /seo-report <url>   (open a new session so the skill loads)"
+# 7. Reports workspace: project-level skill link + CLAUDE.md so the skill works even if user skills are not listed
+WORK="$HOME/adcraft-seo-reports"
+mkdir -p "$WORK/.claude/skills"
+[[ -e "$WORK/.claude/skills/seo-report" ]] || ln -s "$SKILL_DIR" "$WORK/.claude/skills/seo-report"
+cp "$SKILL_DIR/project-template/CLAUDE.md" "$WORK/CLAUDE.md"
+say "Reports workspace ready at $WORK"
+
+say "Done. Open $WORK in Claude Code, start a new session and run:  /seo-report <url>"

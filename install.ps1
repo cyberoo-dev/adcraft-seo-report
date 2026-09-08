@@ -94,4 +94,13 @@ if (-not (Test-Path $Keys)) {
   Say "Created $Keys (readable only by $env:USERNAME). Add RELAY_URL and RELAY_TOKEN to it."
 } else { Say "Keys file already present at $Keys" }
 
-Say "Done. Open a NEW Claude Code session and run:  /seo-report <url>"
+# 7. Reports workspace: project-level skill link + CLAUDE.md (works even when the desktop app
+#    fails to list user skills, a known Windows regression). Open this folder in the app.
+$Work = Join-Path $env:USERPROFILE "adcraft-seo-reports"
+$Link = Join-Path $Work ".claude\skills\seo-report"
+New-Item -ItemType Directory -Force -Path (Split-Path $Link) | Out-Null
+if (-not (Test-Path $Link)) { New-Item -ItemType Junction -Path $Link -Target $SkillDir | Out-Null }
+Copy-Item (Join-Path $SkillDir "project-template\CLAUDE.md") (Join-Path $Work "CLAUDE.md") -Force
+Say "Reports workspace ready at $Work (open this folder in the Claude app)"
+
+Say "Done. Quit the Claude app fully, reopen it, open the folder $Work, start a new session and type:  /seo-report <url>  (or just the website address)"
