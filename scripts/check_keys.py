@@ -47,11 +47,28 @@ def check(name, fn):
         print(f"FAIL {name}: {e} {body}")
 
 
+def relay_call(k, path, payload, timeout=90):
+    return call(k["RELAY_URL"].rstrip("/") + path, {"Authorization": f"Bearer {k['RELAY_TOKEN']}", "Content-Type": "application/json"},
+                json.dumps(payload).encode(), timeout=timeout)
+
+
 def main():
     k = load_keys()
+    relay = bool(k.get("RELAY_URL") and k.get("RELAY_TOKEN"))
+    if relay:
+        print(f"Using key relay at {k['RELAY_URL']}")
+        try:
+            h = call(k["RELAY_URL"].rstrip("/") + "/health")
+            print("OK   Relay health:", h.get("vendors"))
+        except Exception as e:  # noqa: BLE001
+            print("FAIL Relay health:", e)
 
     def ahrefs():
         key = k.get("AHREFS_API_KEY")
+        if not key and relay:
+            d = relay_call(k, "/ahrefs", {"target": DOMAIN})
+            dr = d.get("domain_rating")
+            return f"DR={dr.get('domain_rating') if isinstance(dr, dict) else dr} (via relay)"
         if not key:
             return "skipped (no key)"
         d = call(
@@ -63,6 +80,10 @@ def main():
 
     def opr():
         key = k.get("OPENPAGERANK_API_KEY")
+        if not key and relay:
+            d = relay_call(k, "/opr", {"domains": [DOMAIN], "include_history": False})
+            first = (d.get("results") or [{}])[0]
+            return {kk: first.get(kk) for kk in ("domain", "open_page_rank", "rank", "referring_domains")} | {"via": "relay"}
         if not key:
             return "skipped (no key)"
         d = call(
@@ -75,33 +96,30 @@ def main():
 
     def serpapi():
         key = k.get("SERPAPI_API_KEY")
-        if not key:
+        params = {"engine": "google", "q": "digital marketing agency wollongong", "google_domain": "google.com.au",
+                  "gl": "au", "hl": "en", "location": "Wollongong, New South Wales, Australia"}
+        if not key and relay:
+            d = relay_call(k, "/serpapi", {"params": params}, timeout=120)
+        elif not key:
             return "skipped (no key)"
-        q = urllib.parse.urlencode(
-            {
-                "engine": "google",
-                "q": "digital marketing agency wollongong",
-                "google_domain": "google.com.au",
-                "gl": "au",
-                "hl": "en",
-                "location": "Wollongong, New South Wales, Australia",
-                "num": 10,
-                "api_key": key,
-            }
-        )
-        d = call("https://serpapi.com/search.json?" + q, timeout=60)
+        else:
+            d = call("https://serpapi.com/search.json?" + urllib.parse.urlencode({**params, "api_key": key}), timeout=60)
         organic = d.get("organic_results", [])
         pos = next((r.get("position") for r in organic if DOMAIN in (r.get("link") or "")), None)
         return f"organic={len(organic)} position_for_test_query={pos} ai_overview={'yes' if d.get('ai_overview') else 'no'}"
 
     def gemini():
         key = k.get("GEMINI_API_KEY")
-        if not key:
-            return "skipped (no key)"
         body = {
             "contents": [{"parts": [{"text": "Name three digital marketing agencies in Wollongong, Australia. Answer briefly with website domains."}]}],
             "tools": [{"google_search": {}}],
         }
+        if not key and relay:
+            d = relay_call(k, "/gemini", {"model": "gemini-2.5-flash", "body": body}, timeout=150)
+            text = d["candidates"][0]["content"]["parts"][0].get("text", "")
+            return f"ok via relay: {text[:100]!r}"
+        if not key:
+            return "skipped (no key)"
         d = call(
             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}",
             {"Content-Type": "application/json"},
@@ -115,10 +133,13 @@ def main():
 
     def reddit():
         key = k.get("SERPAPI_API_KEY")
-        if not key:
+        params = {"engine": "google", "q": f'site:reddit.com "{DOMAIN}"', "gl": "au", "hl": "en"}
+        if not key and relay:
+            d = relay_call(k, "/serpapi", {"params": params}, timeout=120)
+        elif not key:
             return "skipped (no SerpApi key; Reddit is checked via SerpApi site: search)"
-        q = urllib.parse.urlencode({"engine": "google", "q": f'site:reddit.com "{DOMAIN}"', "gl": "au", "hl": "en", "api_key": key})
-        d = call("https://serpapi.com/search.json?" + q, timeout=60)
+        else:
+            d = call("https://serpapi.com/search.json?" + urllib.parse.urlencode({**params, "api_key": key}), timeout=60)
         return f"reddit_results={len(d.get('organic_results', []))} (via SerpApi)"
 
     def wikipedia():
