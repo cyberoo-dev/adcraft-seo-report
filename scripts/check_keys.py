@@ -27,8 +27,11 @@ def load_keys():
     return keys
 
 
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 AdcraftSEOReport/1.0"
+
+
 def call(url, headers=None, data=None, timeout=30):
-    req = urllib.request.Request(url, headers=headers or {}, data=data)
+    req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})}, data=data)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
