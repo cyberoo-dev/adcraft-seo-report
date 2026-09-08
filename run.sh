@@ -14,6 +14,8 @@ export PLAYWRIGHT_BROWSERS_PATH="$DATA_DIR/ms-playwright"
 export no_proxy="*"
 export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 export CLAUDE_SEO_PYTHON="${CLAUDE_SEO_PYTHON:-$VENV_PY}"
+export CLAUDE_SEO_DATA_DIR="${CLAUDE_SEO_DATA_DIR:-$DATA_DIR}"
+if [[ -z "${CLAUDE_SEO_ROOT:-}" && -d "$DATA_DIR/src/scripts" ]]; then export CLAUDE_SEO_ROOT="$DATA_DIR/src"; fi
 # Keep both Macs on the latest version: quiet fast-forward pull at most once a day (10s cap).
 STAMP="$SKILL_DIR/.last-pull"
 if [[ -d "$SKILL_DIR/.git" ]] && [[ -z "${SEO_REPORT_NO_PULL:-}" ]] && { [[ ! -f "$STAMP" ]] || [[ $(( $(date +%s) - $(stat -f %m "$STAMP") )) -gt 86400 ]]; }; then

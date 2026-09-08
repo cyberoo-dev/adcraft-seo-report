@@ -27,16 +27,12 @@ else
 fi
 chmod +x "$SKILL_DIR/run.sh" "$SKILL_DIR/install.sh"
 
-# 2. Claude Code binary (CLI, VS Code extension, or desktop app)
+# 2. Claude Code binary (optional: CLI or VS Code extension). The desktop app has none; that's fine.
 CLAUDE_BIN="$(command -v claude || true)"
 if [[ -z "$CLAUDE_BIN" ]]; then
   CLAUDE_BIN="$(ls -t "$HOME"/.vscode/extensions/anthropic.claude-code-*/resources/native-binary/claude 2>/dev/null | head -1 || true)"
 fi
-if [[ -z "$CLAUDE_BIN" ]]; then
-  echo "Claude Code binary not found. Install Claude Code, then re-run this script." >&2
-  exit 1
-fi
-say "Using Claude Code at $CLAUDE_BIN ($("$CLAUDE_BIN" --version 2>/dev/null | head -1))"
+[[ -n "$CLAUDE_BIN" ]] && say "Claude CLI found at $CLAUDE_BIN" || say "No Claude CLI found (desktop app only); installing the engine from source instead"
 
 # 3. Python 3.10+ (via uv if the system Python is too old)
 PY=""
@@ -67,18 +63,30 @@ d.setdefault("env", {})["CLAUDE_SEO_PYTHON"] = py
 p.write_text(json.dumps(d, indent=2) + "\n")
 EOF
 
-# 5. claude-seo plugin (engine) and its isolated runtime + Chromium
-say "Installing / refreshing the claude-seo plugin"
-"$CLAUDE_BIN" plugin marketplace add AgriciDaniel/claude-seo >/dev/null 2>&1 || true
-"$CLAUDE_BIN" plugin install claude-seo@agricidaniel-claude-seo >/dev/null 2>&1 || "$CLAUDE_BIN" plugin update claude-seo@agricidaniel-claude-seo >/dev/null 2>&1 || true
-PLUGIN_BIN="$(ls -d "$HOME"/.claude/plugins/cache/agricidaniel-claude-seo/claude-seo/*/bin/claude-seo 2>/dev/null | sort -V | tail -1 || true)"
-if [[ -z "$PLUGIN_BIN" ]]; then
-  echo "claude-seo plugin did not install. Open Claude Code and run: /plugin install claude-seo@agricidaniel-claude-seo" >&2
-  exit 1
+# 5. claude-seo engine + isolated runtime + Chromium
+DATA_DIR="$HOME/Library/Application Support/claude-seo"
+ENGINE_DIR="$DATA_DIR/src"
+mkdir -p "$DATA_DIR"
+if [[ -n "$CLAUDE_BIN" ]]; then
+  say "Installing / refreshing the claude-seo plugin via the CLI"
+  "$CLAUDE_BIN" plugin marketplace add AgriciDaniel/claude-seo >/dev/null 2>&1 || true
+  "$CLAUDE_BIN" plugin install claude-seo@agricidaniel-claude-seo >/dev/null 2>&1 || "$CLAUDE_BIN" plugin update claude-seo@agricidaniel-claude-seo >/dev/null 2>&1 || true
+fi
+RUNTIME="$(ls -d "$HOME"/.claude/plugins/cache/agricidaniel-claude-seo/claude-seo/*/scripts/runtime.py 2>/dev/null | sort -V | tail -1 || true)"
+if [[ -z "$RUNTIME" ]]; then
+  if [[ -d "$ENGINE_DIR/.git" ]]; then say "Updating claude-seo engine in $ENGINE_DIR"; git -C "$ENGINE_DIR" pull --ff-only -q
+  else say "Cloning claude-seo engine into $ENGINE_DIR"; git clone -q --depth 1 https://github.com/AgriciDaniel/claude-seo.git "$ENGINE_DIR"; fi
+  RUNTIME="$ENGINE_DIR/scripts/runtime.py"
+  "$PY" - "$SETTINGS" "$ENGINE_DIR" "$DATA_DIR" <<'EOF2'
+import json, sys, pathlib
+p = pathlib.Path(sys.argv[1]); d = json.loads(p.read_text()) if p.exists() else {}
+d.setdefault("env", {}).update({"CLAUDE_SEO_ROOT": sys.argv[2], "CLAUDE_SEO_DATA_DIR": sys.argv[3]})
+p.write_text(json.dumps(d, indent=2) + "\n")
+EOF2
 fi
 say "Setting up the claude-seo Python runtime and Chromium (first time takes a few minutes)"
-CLAUDE_SEO_PYTHON="$PY" "$PLUGIN_BIN" setup >/dev/null
-CLAUDE_SEO_PYTHON="$PY" "$PLUGIN_BIN" doctor --json | grep -q '"ready": true' && say "Runtime ready" || { echo "Runtime not ready, run '/seo setup' inside Claude Code." >&2; }
+CLAUDE_SEO_PYTHON="$PY" CLAUDE_SEO_DATA_DIR="$DATA_DIR" "$PY" "$RUNTIME" setup >/dev/null
+CLAUDE_SEO_PYTHON="$PY" CLAUDE_SEO_DATA_DIR="$DATA_DIR" "$PY" "$RUNTIME" doctor --json | grep -q '"ready": true' && say "Runtime ready" || { echo "Runtime not ready; re-run this installer or run '/seo setup' inside Claude Code." >&2; }
 
 # 6. Keys file
 mkdir -p "$CONF_DIR"; chmod 700 "$CONF_DIR"

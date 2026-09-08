@@ -682,16 +682,26 @@ def openpagerank(domains: list[str], key: str | None) -> dict:
         return {"available": False, "reason": str(e)}
 
 
+def claude_seo_root() -> Path | None:
+    """Locate the claude-seo scripts: CLAUDE_SEO_ROOT (git clone) or the newest plugin cache version."""
+    env_root = os.environ.get("CLAUDE_SEO_ROOT")
+    if env_root and (Path(env_root) / "scripts").is_dir():
+        return Path(env_root)
+    cache = Path(os.path.expanduser("~/.claude/plugins/cache/agricidaniel-claude-seo/claude-seo"))
+    vers = sorted([p for p in cache.glob("*") if (p / "scripts").is_dir()], key=lambda p: [int(x) if x.isdigit() else x for x in re.split(r"[.]", p.name)])
+    if vers:
+        return vers[-1]
+    local = Path(os.path.expanduser("~/Library/Application Support/claude-seo/src")) if sys.platform == "darwin" else Path(os.environ.get("LOCALAPPDATA", "")) / "claude-seo" / "src"
+    return local if (local / "scripts").is_dir() else None
+
+
 def commoncrawl(domain: str) -> dict:
-    py = os.environ.get("CLAUDE_SEO_PYTHON")
-    cands = sorted(Path(os.path.expanduser("~/.claude/plugins/cache/agricidaniel-claude-seo/claude-seo")).glob("*/bin/claude-seo"))
-    if not cands:
-        return {"available": False, "reason": "claude-seo plugin not installed"}
+    root = claude_seo_root()
+    if not root:
+        return {"available": False, "reason": "claude-seo engine not installed"}
     env = dict(os.environ)
-    if py:
-        env["CLAUDE_SEO_PYTHON"] = py
     try:
-        r = subprocess.run([str(cands[-1]), "run", "commoncrawl_graph.py", domain, "--json"],
+        r = subprocess.run([sys.executable, str(root / "scripts" / "commoncrawl_graph.py"), domain, "--json"],
                            capture_output=True, text=True, timeout=420, env=env)
         m = re.search(r"\{.*\}", r.stdout, re.S)
         if not m:

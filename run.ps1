@@ -13,6 +13,8 @@ if (-not (Test-Path $VenvPy)) {
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $DataDir "ms-playwright"
 $env:no_proxy = "*"
 if (-not $env:CLAUDE_SEO_PYTHON) { $env:CLAUDE_SEO_PYTHON = $VenvPy }
+if (-not $env:CLAUDE_SEO_DATA_DIR) { $env:CLAUDE_SEO_DATA_DIR = $DataDir }
+if (-not $env:CLAUDE_SEO_ROOT -and (Test-Path (Join-Path $DataDir "src\scripts"))) { $env:CLAUDE_SEO_ROOT = Join-Path $DataDir "src" }
 
 # Keep both computers on the latest version: quiet fast-forward pull at most once a day.
 $Stamp = Join-Path $SkillDir ".last-pull"
